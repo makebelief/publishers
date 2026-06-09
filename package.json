@@ -1,0 +1,15 @@
+{
+  "name": "bar-and-bench-publishers",
+  "version": "1.0.0",
+  "description": "Bar & Bench Publishers Ltd. website",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "dependencies": {
+    "nodemailer": "^8.0.10"
+  }
+}
