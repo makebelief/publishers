@@ -3,11 +3,111 @@ const fs = require('fs');
 const path = require('path');
 const nodemailer = require('nodemailer');
 
+function loadEnvFile() {
+  const envPath = path.join(__dirname, '.env');
+  if (!fs.existsSync(envPath)) return;
+
+  const lines = fs.readFileSync(envPath, 'utf8').split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    const equalsIndex = trimmed.indexOf('=');
+    if (equalsIndex === -1) continue;
+
+    const key = trimmed.slice(0, equalsIndex).trim();
+    let value = trimmed.slice(equalsIndex + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+
+    if (key && process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+}
+
+loadEnvFile();
+
 const CONTACT_EMAIL = 'barbenchpublishers72@gmail.com';
+const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s/g, '');
 const transporter = nodemailer.createTransport({
   service: 'gmail',
-  auth: { user: CONTACT_EMAIL, pass: process.env.GMAIL_PASS || '<YOUR_GMAIL_APP_PASSWORD>' },
+  auth: { user: CONTACT_EMAIL, pass: gmailPass },
 });
+
+// Rate limiting for spam protection (in-memory store)
+const rateLimitStore = new Map();
+const RATE_LIMIT_WINDOW = 60 * 60 * 1000; // 1 hour
+const RATE_LIMIT_MAX_REQUESTS = 100; // Temporarily increased for testing
+
+// Rate limiting check function
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const record = rateLimitStore.get(ip);
+
+  if (!record) {
+    rateLimitStore.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    return true;
+  }
+
+  if (now > record.resetTime) {
+    rateLimitStore.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    return true;
+  }
+
+  if (record.count >= RATE_LIMIT_MAX_REQUESTS) {
+    return false;
+  }
+
+  record.count++;
+  return true;
+}
+
+// Input validation and sanitization
+function validateAndSanitize(data) {
+  const { name, email, subject, message } = data;
+
+  // Check required fields
+  if (!name || !email || !subject || !message) {
+    return { valid: false, error: 'All fields are required' };
+  }
+
+  // Validate email format
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return { valid: false, error: 'Invalid email address' };
+  }
+
+  // Sanitize inputs (basic HTML entity encoding)
+  const sanitize = (str) => {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+      .trim();
+  };
+
+  // Validate field lengths
+  if (name.length > 100 || email.length > 100 || subject.length > 200 || message.length > 5000) {
+    return { valid: false, error: 'Field length exceeds maximum allowed' };
+  }
+
+  return {
+    valid: true,
+    data: {
+      name: sanitize(name),
+      email: sanitize(email),
+      subject: sanitize(subject),
+      message: sanitize(message)
+    }
+  };
+}
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PORT = process.env.PORT || 3000;
@@ -132,26 +232,95 @@ function sendError(res, code) {
 const server = http.createServer((req, res) => {
   // Contact form handler
   if (req.method === 'POST' && req.url === '/contact') {
+    if (!gmailPass) {
+      res.setHeader('Content-Type', 'application/json');
+      res.writeHead(500);
+      return res.end(JSON.stringify({
+        error: 'Contact form is not configured. Missing GMAIL_PASS on the server.'
+      }));
+    }
+
+    // Extract IP address for rate limiting
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+
+    // Check rate limit
+    if (!checkRateLimit(ip)) {
+      res.setHeader('Content-Type', 'application/json');
+      res.writeHead(429);
+      return res.end(JSON.stringify({ error: 'Too many submissions. Please try again later.' }));
+    }
+
     let body = '';
     req.on('data', chunk => { body += chunk; if (body.length > 10000) req.destroy(); });
     req.on('end', async () => {
       try {
-        const { name, email, message } = JSON.parse(body);
-        if (!name || !email || !message) {
-          res.writeHead(400); return res.end(JSON.stringify({ error: 'Missing fields' }));
+        const data = JSON.parse(body);
+
+        // Validate and sanitize input
+        const validation = validateAndSanitize(data);
+        if (!validation.valid) {
+          res.setHeader('Content-Type', 'application/json');
+          res.writeHead(400);
+          return res.end(JSON.stringify({ error: validation.error }));
         }
+
+        const { name, email, subject, message } = validation.data;
+        const timestamp = new Date().toLocaleString('en-US', {
+          timeZone: 'Africa/Nairobi',
+          dateStyle: 'full',
+          timeStyle: 'long'
+        });
+
         await transporter.sendMail({
           from: `"Bar & Bench Website" <${CONTACT_EMAIL}>`,
           to: CONTACT_EMAIL,
           replyTo: email,
-          subject: `New Contact Form Submission from ${name}`,
-          html: `<p><strong>Name:</strong> ${name}</p><p><strong>Email:</strong> ${email}</p><p><strong>Message:</strong><br>${message.replace(/\n/g, '<br>')}</p>`,
+          subject: `[Contact Form] ${subject} - from ${name}`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+              <div style="background: #0f2318; padding: 20px; border-radius: 8px 8px 0 0;">
+                <h2 style="color: #c9a84c; margin: 0; font-size: 24px;">New Contact Form Submission</h2>
+              </div>
+              <div style="background: #faf8f3; padding: 30px; border: 1px solid #d9cfb8; border-top: none; border-radius: 0 0 8px 8px;">
+                <table style="width: 100%; border-collapse: collapse;">
+                  <tr>
+                    <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #163322; font-weight: bold; width: 120px;">Full Name:</td>
+                    <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #1e4a30;">${name}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #163322; font-weight: bold;">Email:</td>
+                    <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #1e4a30;">${email}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #163322; font-weight: bold;">Subject:</td>
+                    <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #1e4a30;">${subject}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #163322; font-weight: bold;">Date & Time:</td>
+                    <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #1e4a30;">${timestamp}</td>
+                  </tr>
+                </table>
+                <div style="margin-top: 20px;">
+                  <p style="color: #163322; font-weight: bold; margin: 0 0 10px 0;">Message:</p>
+                  <div style="background: #f3efe4; padding: 15px; border-radius: 4px; color: #1e4a30; line-height: 1.6; white-space: pre-wrap;">${message}</div>
+                </div>
+                <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #d9cfb8; text-align: center; color: #1e4a30; font-size: 12px;">
+                  <p style="margin: 0;">This message was sent from the Bar & Bench Publishers website contact form.</p>
+                  <p style="margin: 5px 0 0 0;">Click "Reply" in your email client to respond directly to the sender.</p>
+                </div>
+              </div>
+            </div>
+          `,
         });
+
         res.setHeader('Content-Type', 'application/json');
-        res.writeHead(200); res.end(JSON.stringify({ ok: true }));
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true, message: 'Message sent successfully' }));
       } catch (err) {
         console.error('Contact form error:', err.message);
-        res.writeHead(500); res.end(JSON.stringify({ error: 'Failed to send' }));
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: 'Failed to send message. Please try again later.' }));
       }
     });
     return;
@@ -188,7 +357,12 @@ const server = http.createServer((req, res) => {
   };
 
   fs.stat(filePath, (err, stat) => {
-    if (err) return sendError(res, 404);
+    if (err) {
+      if (!path.extname(filePath)) {
+        return tryFile(path.join(PUBLIC_DIR, 'index.html'));
+      }
+      return sendError(res, 404);
+    }
     if (stat.isDirectory()) {
       tryFile(path.join(filePath, 'index.html'));
     } else {
@@ -202,6 +376,9 @@ server.on('error', (err) => {
     console.error(`Port ${PORT} is already in use. Run: fuser -k ${PORT}/tcp`);
     process.exit(1);
   }
+
+  console.error('Server failed to start:', err.message);
+  process.exit(1);
 });
 
 server.listen(PORT, () => {

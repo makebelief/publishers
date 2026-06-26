@@ -20,3 +20,6 @@ Point Nginx to `localhost:3000` and handle SSL termination there.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT`   | `3000`  | Port to listen on |
+| `GMAIL_PASS` | *(required)* | Gmail app password for `barbenchpublishers72@gmail.com`; required for the contact form |
+
+For local testing, create a `.env` file from `.env.example` and put the real Gmail app password there. Use a Gmail app password, not the normal Gmail login password.
