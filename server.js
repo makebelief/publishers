@@ -1,7 +1,12 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const dns = require('dns');
 const nodemailer = require('nodemailer');
+
+if (typeof dns.setDefaultResultOrder === 'function') {
+  dns.setDefaultResultOrder('ipv4first');
+}
 
 function loadEnvFile() {
   const envPath = path.join(__dirname, '.env');
@@ -34,16 +39,35 @@ loadEnvFile();
 
 const CONTACT_EMAIL = 'barbenchpublishers72@gmail.com';
 const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s/g, '');
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false,
-  requireTLS: true,
-  auth: { user: CONTACT_EMAIL, pass: gmailPass },
-  connectionTimeout: 30000,
-  greetingTimeout: 30000,
-  socketTimeout: 60000,
-});
+const SMTP_HOSTNAME = 'smtp.gmail.com';
+let transporterPromise;
+
+function getTransporter() {
+  if (!transporterPromise) {
+    transporterPromise = dns.promises.resolve4(SMTP_HOSTNAME)
+      .then(addresses => {
+        const smtpHost = addresses[0] || SMTP_HOSTNAME;
+        return nodemailer.createTransport({
+          host: smtpHost,
+          port: 587,
+          secure: false,
+          requireTLS: true,
+          auth: { user: CONTACT_EMAIL, pass: gmailPass },
+          tls: { servername: SMTP_HOSTNAME },
+          connectionTimeout: 30000,
+          greetingTimeout: 30000,
+          socketTimeout: 60000,
+        });
+      })
+      .catch(err => {
+        console.error('SMTP IPv4 resolve error:', err.message);
+        transporterPromise = null;
+        throw err;
+      });
+  }
+
+  return transporterPromise;
+}
 
 function withTimeout(promise, ms, message) {
   return Promise.race([
@@ -307,6 +331,7 @@ const server = http.createServer((req, res) => {
           timeStyle: 'long'
         });
 
+        const transporter = await getTransporter();
         await withTimeout(
           transporter.sendMail({
             from: `"Bar & Bench Website" <${CONTACT_EMAIL}>`,
