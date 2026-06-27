@@ -35,7 +35,10 @@ loadEnvFile();
 const CONTACT_EMAIL = 'barbenchpublishers72@gmail.com';
 const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s/g, '');
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false,
+  requireTLS: true,
   auth: { user: CONTACT_EMAIL, pass: gmailPass },
   connectionTimeout: 30000,
   greetingTimeout: 30000,
