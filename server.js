@@ -54,6 +54,27 @@ function withTimeout(promise, ms, message) {
   ]);
 }
 
+function getContactErrorResponse(err) {
+  if (err.message === 'Email send timed out') {
+    return {
+      status: 504,
+      error: 'The message could not be sent because the email server timed out. Please try again in a moment.'
+    };
+  }
+
+  if (err.code === 'EAUTH' || err.responseCode === 535) {
+    return {
+      status: 500,
+      error: 'The contact form email login is not configured correctly. Please contact us directly.'
+    };
+  }
+
+  return {
+    status: 500,
+    error: 'Failed to send message. Please try again later.'
+  };
+}
+
 // Rate limiting for spam protection (in-memory store)
 const rateLimitStore = new Map();
 const RATE_LIMIT_WINDOW = 60 * 60 * 1000; // 1 hour
@@ -336,10 +357,17 @@ const server = http.createServer((req, res) => {
         res.writeHead(200);
         res.end(JSON.stringify({ ok: true, message: 'Message sent successfully' }));
       } catch (err) {
-        console.error('Contact form error:', err.message);
+        console.error('Contact form error:', {
+          message: err.message,
+          code: err.code,
+          command: err.command,
+          responseCode: err.responseCode,
+          response: err.response
+        });
+        const errorResponse = getContactErrorResponse(err);
         res.setHeader('Content-Type', 'application/json');
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: 'Failed to send message. Please try again later.' }));
+        res.writeHead(errorResponse.status);
+        res.end(JSON.stringify({ error: errorResponse.error }));
       }
     });
     return;
