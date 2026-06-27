@@ -37,9 +37,9 @@ const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s/g, '');
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: { user: CONTACT_EMAIL, pass: gmailPass },
-  connectionTimeout: 10000,
-  greetingTimeout: 10000,
-  socketTimeout: 15000,
+  connectionTimeout: 30000,
+  greetingTimeout: 30000,
+  socketTimeout: 60000,
 });
 
 function withTimeout(promise, ms, message) {
@@ -325,7 +325,7 @@ const server = http.createServer((req, res) => {
               </div>
             `,
           }),
-          16000,
+          65000,
           'Email send timed out'
         );
 
