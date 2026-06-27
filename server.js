@@ -89,6 +89,11 @@ async function sendViaWebhook(payload) {
     const responseText = await response.text().catch(() => '');
     throw new Error(`Contact webhook failed with ${response.status}: ${responseText.slice(0, 300)}`);
   }
+
+  const result = await response.json().catch(() => null);
+  if (result && result.ok === false) {
+    throw new Error(`Contact webhook rejected request: ${result.error || 'Unknown error'}`);
+  }
 }
 
 function withTimeout(promise, ms, message) {
