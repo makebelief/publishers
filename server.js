@@ -39,6 +39,8 @@ loadEnvFile();
 
 const CONTACT_EMAIL = 'barbenchpublishers72@gmail.com';
 const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s/g, '');
+const CONTACT_WEBHOOK_URL = (process.env.CONTACT_WEBHOOK_URL || '').trim();
+const CONTACT_WEBHOOK_SECRET = (process.env.CONTACT_WEBHOOK_SECRET || '').trim();
 const SMTP_HOSTNAME = 'smtp.gmail.com';
 let transporterPromise;
 
@@ -69,6 +71,26 @@ function getTransporter() {
   return transporterPromise;
 }
 
+async function sendViaWebhook(payload) {
+  const response = await withTimeout(
+    fetch(CONTACT_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        secret: CONTACT_WEBHOOK_SECRET,
+        ...payload
+      })
+    }),
+    30000,
+    'Contact webhook timed out'
+  );
+
+  if (!response.ok) {
+    const responseText = await response.text().catch(() => '');
+    throw new Error(`Contact webhook failed with ${response.status}: ${responseText.slice(0, 300)}`);
+  }
+}
+
 function withTimeout(promise, ms, message) {
   return Promise.race([
     promise,
@@ -79,6 +101,13 @@ function withTimeout(promise, ms, message) {
 }
 
 function getContactErrorResponse(err) {
+  if (err.message === 'Contact webhook timed out') {
+    return {
+      status: 504,
+      error: 'The message could not be sent because the contact email service timed out. Please try again in a moment.'
+    };
+  }
+
   if (err.message === 'Email send timed out') {
     return {
       status: 504,
@@ -292,11 +321,11 @@ function sendError(res, code) {
 const server = http.createServer((req, res) => {
   // Contact form handler
   if (req.method === 'POST' && req.url === '/contact') {
-    if (!gmailPass) {
+    if (!CONTACT_WEBHOOK_URL && !gmailPass) {
       res.setHeader('Content-Type', 'application/json');
       res.writeHead(500);
       return res.end(JSON.stringify({
-        error: 'Contact form is not configured. Missing GMAIL_PASS on the server.'
+        error: 'Contact form is not configured on the server.'
       }));
     }
 
@@ -331,14 +360,7 @@ const server = http.createServer((req, res) => {
           timeStyle: 'long'
         });
 
-        const transporter = await getTransporter();
-        await withTimeout(
-          transporter.sendMail({
-            from: `"Bar & Bench Website" <${CONTACT_EMAIL}>`,
-            to: CONTACT_EMAIL,
-            replyTo: email,
-            subject: `[Contact Form] ${subject} - from ${name}`,
-            html: `
+        const emailHtml = `
               <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
                 <div style="background: #0f2318; padding: 20px; border-radius: 8px 8px 0 0;">
                   <h2 style="color: #c9a84c; margin: 0; font-size: 24px;">New Contact Form Submission</h2>
@@ -372,11 +394,34 @@ const server = http.createServer((req, res) => {
                   </div>
                 </div>
               </div>
-            `,
-          }),
-          65000,
-          'Email send timed out'
-        );
+            `;
+
+        if (CONTACT_WEBHOOK_URL) {
+          await sendViaWebhook({
+            to: CONTACT_EMAIL,
+            replyTo: email,
+            name,
+            email,
+            subject,
+            message,
+            timestamp,
+            emailSubject: `[Contact Form] ${subject} - from ${name}`,
+            html: emailHtml
+          });
+        } else {
+          const transporter = await getTransporter();
+          await withTimeout(
+            transporter.sendMail({
+              from: `"Bar & Bench Website" <${CONTACT_EMAIL}>`,
+              to: CONTACT_EMAIL,
+              replyTo: email,
+              subject: `[Contact Form] ${subject} - from ${name}`,
+              html: emailHtml,
+            }),
+            65000,
+            'Email send timed out'
+          );
+        }
 
         res.setHeader('Content-Type', 'application/json');
         res.writeHead(200);
