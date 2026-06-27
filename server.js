@@ -163,7 +163,7 @@ function checkRateLimit(ip) {
 
 // Input validation and sanitization
 function validateAndSanitize(data) {
-  const { name, email, subject, message } = data;
+  const { name, email, phone, subject, message } = data;
 
   // Check required fields
   if (!name || !email || !subject || !message) {
@@ -188,7 +188,7 @@ function validateAndSanitize(data) {
   };
 
   // Validate field lengths
-  if (name.length > 100 || email.length > 100 || subject.length > 200 || message.length > 5000) {
+  if (name.length > 100 || email.length > 100 || (phone && phone.length > 40) || subject.length > 200 || message.length > 5000) {
     return { valid: false, error: 'Field length exceeds maximum allowed' };
   }
 
@@ -197,6 +197,7 @@ function validateAndSanitize(data) {
     data: {
       name: sanitize(name),
       email: sanitize(email),
+      phone: phone ? sanitize(phone) : 'Not provided',
       subject: sanitize(subject),
       message: sanitize(message)
     }
@@ -358,7 +359,7 @@ const server = http.createServer((req, res) => {
           return res.end(JSON.stringify({ error: validation.error }));
         }
 
-        const { name, email, subject, message } = validation.data;
+        const { name, email, phone, subject, message } = validation.data;
         const timestamp = new Date().toLocaleString('en-US', {
           timeZone: 'Africa/Nairobi',
           dateStyle: 'full',
@@ -379,6 +380,10 @@ const server = http.createServer((req, res) => {
                     <tr>
                       <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #163322; font-weight: bold;">Email:</td>
                       <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #1e4a30;">${email}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #163322; font-weight: bold;">Phone:</td>
+                      <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #1e4a30;">${phone}</td>
                     </tr>
                     <tr>
                       <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #163322; font-weight: bold;">Subject:</td>
@@ -407,6 +412,7 @@ const server = http.createServer((req, res) => {
             replyTo: email,
             name,
             email,
+            phone,
             subject,
             message,
             timestamp,
