@@ -37,7 +37,19 @@ const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s/g, '');
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: { user: CONTACT_EMAIL, pass: gmailPass },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 15000,
 });
+
+function withTimeout(promise, ms, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(message)), ms);
+    })
+  ]);
+}
 
 // Rate limiting for spam protection (in-memory store)
 const rateLimitStore = new Map();
@@ -271,47 +283,51 @@ const server = http.createServer((req, res) => {
           timeStyle: 'long'
         });
 
-        await transporter.sendMail({
-          from: `"Bar & Bench Website" <${CONTACT_EMAIL}>`,
-          to: CONTACT_EMAIL,
-          replyTo: email,
-          subject: `[Contact Form] ${subject} - from ${name}`,
-          html: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-              <div style="background: #0f2318; padding: 20px; border-radius: 8px 8px 0 0;">
-                <h2 style="color: #c9a84c; margin: 0; font-size: 24px;">New Contact Form Submission</h2>
-              </div>
-              <div style="background: #faf8f3; padding: 30px; border: 1px solid #d9cfb8; border-top: none; border-radius: 0 0 8px 8px;">
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr>
-                    <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #163322; font-weight: bold; width: 120px;">Full Name:</td>
-                    <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #1e4a30;">${name}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #163322; font-weight: bold;">Email:</td>
-                    <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #1e4a30;">${email}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #163322; font-weight: bold;">Subject:</td>
-                    <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #1e4a30;">${subject}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #163322; font-weight: bold;">Date & Time:</td>
-                    <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #1e4a30;">${timestamp}</td>
-                  </tr>
-                </table>
-                <div style="margin-top: 20px;">
-                  <p style="color: #163322; font-weight: bold; margin: 0 0 10px 0;">Message:</p>
-                  <div style="background: #f3efe4; padding: 15px; border-radius: 4px; color: #1e4a30; line-height: 1.6; white-space: pre-wrap;">${message}</div>
+        await withTimeout(
+          transporter.sendMail({
+            from: `"Bar & Bench Website" <${CONTACT_EMAIL}>`,
+            to: CONTACT_EMAIL,
+            replyTo: email,
+            subject: `[Contact Form] ${subject} - from ${name}`,
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <div style="background: #0f2318; padding: 20px; border-radius: 8px 8px 0 0;">
+                  <h2 style="color: #c9a84c; margin: 0; font-size: 24px;">New Contact Form Submission</h2>
                 </div>
-                <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #d9cfb8; text-align: center; color: #1e4a30; font-size: 12px;">
-                  <p style="margin: 0;">This message was sent from the Bar & Bench Publishers website contact form.</p>
-                  <p style="margin: 5px 0 0 0;">Click "Reply" in your email client to respond directly to the sender.</p>
+                <div style="background: #faf8f3; padding: 30px; border: 1px solid #d9cfb8; border-top: none; border-radius: 0 0 8px 8px;">
+                  <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                      <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #163322; font-weight: bold; width: 120px;">Full Name:</td>
+                      <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #1e4a30;">${name}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #163322; font-weight: bold;">Email:</td>
+                      <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #1e4a30;">${email}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #163322; font-weight: bold;">Subject:</td>
+                      <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #1e4a30;">${subject}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #163322; font-weight: bold;">Date & Time:</td>
+                      <td style="padding: 12px 0; border-bottom: 1px solid #d9cfb8; color: #1e4a30;">${timestamp}</td>
+                    </tr>
+                  </table>
+                  <div style="margin-top: 20px;">
+                    <p style="color: #163322; font-weight: bold; margin: 0 0 10px 0;">Message:</p>
+                    <div style="background: #f3efe4; padding: 15px; border-radius: 4px; color: #1e4a30; line-height: 1.6; white-space: pre-wrap;">${message}</div>
+                  </div>
+                  <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #d9cfb8; text-align: center; color: #1e4a30; font-size: 12px;">
+                    <p style="margin: 0;">This message was sent from the Bar & Bench Publishers website contact form.</p>
+                    <p style="margin: 5px 0 0 0;">Click "Reply" in your email client to respond directly to the sender.</p>
+                  </div>
                 </div>
               </div>
-            </div>
-          `,
-        });
+            `,
+          }),
+          16000,
+          'Email send timed out'
+        );
 
         res.setHeader('Content-Type', 'application/json');
         res.writeHead(200);
