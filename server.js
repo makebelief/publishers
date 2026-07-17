@@ -469,6 +469,10 @@ const server = http.createServer((req, res) => {
 
   let filePath = path.normalize(path.join(PUBLIC_DIR, urlPath));
 
+  if (urlPath === '/privacy-policy') {
+    filePath = path.join(PUBLIC_DIR, 'privacy-policy.html');
+  }
+
   if (!filePath.startsWith(PUBLIC_DIR)) {
     return sendError(res, 403);
   }
